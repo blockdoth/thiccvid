@@ -1,0 +1,8 @@
+[package]
+name = "thiccvid"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ffmpeg-next = "9.0.0"
+raylib = { version = "6.0.0", features = ["wayland", "sdl"] }
