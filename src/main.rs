@@ -17,6 +17,7 @@ const FPS_SMOOTHING: f64 = 0.8;
 
 fn main() -> Result<(), ffmpeg::Error> {
     let video = dump_video("assets/office.mp4")?;
+
     println!("Frame count {}", video.frames.len());
     println!("Dims: {}x{}", video.width, video.height);
 
@@ -37,7 +38,7 @@ fn main() -> Result<(), ffmpeg::Error> {
             Vector3 { x: 0.0, y: 1.0, z: 0.0 },
             45.0,
         ),
-        frame_transparency: 5,
+        frame_transparency: 3L,
         frames_distance: 0.02,
 
         frames_visible: video.frames.len(),
@@ -49,46 +50,13 @@ fn main() -> Result<(), ffmpeg::Error> {
 
     let mesh = Mesh::gen_mesh_plane(&thread, video.width as f32 * scale, video.height as f32 * scale, 10, 10);
 
-    let mut textures = Vec::new();
-    let mut material_opaque = Vec::new();
-    let mut material_transparant = Vec::new();
-
     let mut shader = rl.load_shader(&thread, None, Some("src/blur.fs"));
-    let blur_radius = shader.get_shader_location("blurRadius");
-    let alpha = shader.get_shader_location("alpha");
-    shader.set_shader_value(blur_radius, 3);
-    shader.set_shader_value(alpha, state.frame_transparency as f32);
 
-    for image_bytes in video.frames.iter() {
-        let image_raw = ffi::Image {
-            data: image_bytes.as_ptr() as *mut c_void,
-            width: video.width,
-            height: video.height,
-            mipmaps: 1,
-            format: ffi::PixelFormat::PIXELFORMAT_UNCOMPRESSED_R8G8B8 as i32,
-        };
-        let image = unsafe { Image::from_raw(image_raw) };
-        let texture = rl.load_texture_from_image(&thread, &image).unwrap();
-        std::mem::forget(image);
-
-        let mut opaque = rl.load_material_default(&thread);
-        opaque.set_material_texture(MaterialMapIndex::MATERIAL_MAP_ALBEDO, &texture);
-
-        let mut transparent = rl.load_material_default(&thread);
-        transparent.set_material_texture(MaterialMapIndex::MATERIAL_MAP_ALBEDO, &texture);
-        transparent.set_shader(&shader);
-
-        textures.push(texture);
-        material_opaque.push(opaque);
-        material_transparant.push(transparent);
-    }
+    let (textures, materials_opaque, materials_transparant) = render_texture(&state, &thread, &mut rl, &video, &mut shader);
 
     let direction = Matrix::rotate(Vector3 { x: 1.0, y: 0.0, z: 0.0 }, PI / 2.0);
-
     let time_per_frame = Duration::from_secs_f64(1.0 / FPS as f64);
-
     let mut last_frame = Instant::now();
-
     let mut fps = FPS as f64;
 
     while !rl.window_should_close() {
@@ -97,6 +65,7 @@ fn main() -> Result<(), ffmpeg::Error> {
         if now.duration_since(last_frame) >= time_per_frame {
             handle_input(&mut rl, &mut state);
             update_camera(&mut state);
+
             let mut d = rl.begin_drawing(&thread);
             d.clear_background(Color::BLACK);
             {
@@ -104,9 +73,9 @@ fn main() -> Result<(), ffmpeg::Error> {
                 let mut d3 = d3.begin_blend_mode(BlendMode::BLEND_ALPHA);
 
                 let offset = state.frames_visible as f32 / -2.0 * state.frames_distance;
-                for (idx, (material_opague, material_transparant)) in material_opaque
+                for (idx, (material_opague, material_transparant)) in materials_opaque
                     .iter()
-                    .zip(&material_transparant)
+                    .zip(&materials_transparant)
                     // .rev()
                     .take(state.frames_visible)
                     .enumerate()
@@ -136,6 +105,43 @@ fn main() -> Result<(), ffmpeg::Error> {
         }
     }
     Ok(())
+}
+
+fn render_texture(state: &State, thread: &RaylibThread, rl: &mut RaylibHandle,  video: &VideoContainer, shader: &mut Shader) -> (Vec<Texture2D>, Vec<WeakMaterial>, Vec<WeakMaterial>) {
+    let mut textures = Vec::new();
+    let mut materials_opaque = Vec::new();
+    let mut materials_transparant = Vec::new();
+
+    let blur_radius = shader.get_shader_location("blurRadius");
+    let alpha = shader.get_shader_location("alpha");
+
+    shader.set_shader_value(blur_radius, 3);
+    shader.set_shader_value(alpha, state.frame_transparency as f32);
+
+    for image_bytes in video.frames.iter() {
+        let image_raw = ffi::Image {
+            data: image_bytes.as_ptr() as *mut c_void,
+            width: video.width,
+            height: video.height,
+            mipmaps: 1,
+            format: ffi::PixelFormat::PIXELFORMAT_UNCOMPRESSED_R8G8B8 as i32,
+        };
+        let image = unsafe { Image::from_raw(image_raw) };
+        let texture = rl.load_texture_from_image(thread, &image).unwrap();
+        std::mem::forget(image);
+
+        let mut opaque = rl.load_material_default(thread);
+        opaque.set_material_texture(MaterialMapIndex::MATERIAL_MAP_ALBEDO, &texture);
+
+        let mut transparent = rl.load_material_default(thread);
+        transparent.set_material_texture(MaterialMapIndex::MATERIAL_MAP_ALBEDO, &texture);
+        transparent.set_shader(&shader);
+
+        materials_opaque.push(opaque);
+        materials_transparant.push(transparent);
+        textures.push(texture);
+    }
+    (textures, materials_opaque, materials_transparant)
 }
 
 struct State {
