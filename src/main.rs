@@ -38,7 +38,7 @@ fn main() -> Result<(), ffmpeg::Error> {
             Vector3 { x: 0.0, y: 1.0, z: 0.0 },
             45.0,
         ),
-        frame_transparency: 3L,
+        frame_transparency: 3,
         frames_distance: 0.02,
 
         frames_visible: video.frames.len(),
